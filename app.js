@@ -34,6 +34,8 @@ const SKILLS = [
   { k: 'legs', label: 'Mezi nohama',         xp: 8  },
   { k: 'one',  label: 'Z první (one-timer)', xp: 6  },
   { k: 'full', label: 'Přes celé hřiště',    xp: 12 },
+  // Bonus mimo skill shoty (nepočítá se do „skill shotů celkem“ ani do jejich odznaků)
+  { k: 'def',  label: 'Gól obránce',         xp: 5, extra: true },
 ];
 
 const DIFF = { easy: 'Lehká', mid: 'Střední', hard: 'Těžká' };
@@ -182,7 +184,7 @@ const ACH = [
   { id: 'lavicka',  ic: '🪑', name: 'Čestný člen lavičky',    desc: '5 proher v řadě',                       test: c => c.s.cur <= -5 },
   { id: 'smolar',   ic: '🍀', name: 'Smolař',                 desc: '3 prohry v prodloužení / nájezdech',    test: c => c.s.otL >= 3 },
   { id: 'nervy',    ic: '🧊', name: 'Nervy z oceli',          desc: '5 výher v prodloužení / nájezdech',     test: c => c.s.otW >= 5 },
-  { id: 'mlynek',   ic: '🌪️', name: 'Mixér',                  desc: '3 různé skill shoty v jednom zápase',   test: c => SKILLS.filter(s => c.sk[s.k] > 0).length >= 3 },
+  { id: 'mlynek',   ic: '🌪️', name: 'Mixér',                  desc: '3 různé skill shoty v jednom zápase',   test: c => SKILLS.filter(s => !s.extra && c.sk[s.k] > 0).length >= 3 },
   { id: 'bekhend',  ic: '🔙', name: 'Bekhendový bůh',         desc: '10 gólů bekhendem',                     test: c => c.s.skills.bh >= 10 },
   { id: 'michigan', ic: '🥍', name: 'Michigan Man',           desc: '3 góly à la lacrosse',                  test: c => c.s.skills.lax >= 3 },
   { id: 'kmet',     ic: '👴', name: 'Ligový kmet',            desc: '50 odehraných zápasů',                  test: c => c.s.games >= 50 },
@@ -473,7 +475,7 @@ function compute() {
       s.xp += xp; mxp[m.id][p] = xp;
       s.games++; s.gf += gf; s.ga += ga;
       const sk = (m.skills && m.skills[p]) || {};
-      for (const k of SKILLS) { const n = sk[k.k] || 0; s.skills[k.k] += n; s.skillTotal += n; }
+      for (const k of SKILLS) { const n = sk[k.k] || 0; s.skills[k.k] += n; if (!k.extra) s.skillTotal += n; }
       if (win) {
         s.w++; s.byMode[m.mode].w++;
         s.cur = s.cur > 0 ? s.cur + 1 : 1;
@@ -994,7 +996,7 @@ function viewHist(comp) {
   <div class="wrap" style="margin-top:12px">
     ${list.length ? list.map(m => {
       const w = m.s[0] > m.s[1] ? 0 : 1, x = comp.mxp[m.id];
-      const sk = [0, 1].map(p => SKILLS.reduce((n, s) => n + ((m.skills?.[p]?.[s.k]) || 0), 0));
+      const sk = [0, 1].map(p => SKILLS.filter(s => !s.extra).reduce((n, s) => n + ((m.skills?.[p]?.[s.k]) || 0), 0));
       const t = m.teams || ['', ''];
       return `<div class="card match">
         <div class="row small mut"><span>${fmtDate(m.date)}</span><span><span class="chip m">${MODES[m.mode].label}</span>${m.ot ? ' <span class="chip">PP/SN</span>' : ''}</span></div>
@@ -1318,7 +1320,7 @@ function renderForm() {
     </div>` : ''}
 
     <div class="card">
-      <div class="h">Skill shoty</div>
+      <div class="h">Skill shoty a bonusy</div>
       <div class="skhead"><span>${nm(0)}</span><span>${nm(1)}</span></div>
       ${SKILLS.map(s => `<div class="sk">${counter(0, s.k)}<div class="lab">${s.label}<small>+${s.xp} XP</small></div>${counter(1, s.k)}</div>`).join('')}
     </div>
