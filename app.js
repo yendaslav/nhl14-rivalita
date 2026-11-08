@@ -1374,6 +1374,7 @@ function viewSet() {
         <div class="row"><span>Stav</span><b>${Sync.statusText()}</b></div>
         <div class="small mut" style="margin:6px 0 10px">Kód rivality: <b>${esc(Sync.room)}</b></div>
         <div class="gap8">
+          <button class="btn ghost" data-a="sync-copy">📋 Zkopírovat kód</button>
           <button class="btn ghost" data-a="sync-qr">📱 Ukázat QR pro druhý telefon</button>
           <button class="btn ghost" data-a="sync-now">🔄 Synchronizovat teď</button>
           <button class="btn danger" data-a="sync-off">Odpojit tento telefon</button>
@@ -2206,15 +2207,20 @@ document.addEventListener('click', async e => {
       break;
     }
     case 'sync-join':
-      showModal(`<h3>Připojit kódem</h3><input class="field" id="syncCode" placeholder="Kód rivality" autocomplete="off">
+      showModal(`<h3>Připojit kódem</h3><input class="field" id="syncCode" placeholder="Vlož kód nebo odkaz" autocomplete="off">
         <button class="btn" data-a="sync-join-go">Připojit</button><button class="btn ghost" data-a="modal-close">Zrušit</button>`);
       break;
     case 'sync-join-go': {
-      const code = document.getElementById('syncCode').value.trim();
+      let code = document.getElementById('syncCode').value.trim();
+      const m = code.match(/[?&]room=([^&\s]+)/); if (m) code = decodeURIComponent(m[1]);
       if (code) { hideModal(); Sync.join(code); render(); }
       break;
     }
     case 'sync-qr': showSyncQR(); break;
+    case 'sync-copy':
+      try { await navigator.clipboard.writeText(Sync.room); toast('📋', 'Zkopírováno', 'Vlož kód do appky na ploše'); }
+      catch (err) { toast('📋', 'Nejde kopírovat', 'Kód podrž prstem a zkopíruj ručně'); }
+      break;
     case 'sync-now': Sync.pull(); toast('🔄', 'Synchronizace', 'Stahuji data…'); break;
     case 'sync-off':
       if (await confirmBox('Odpojit tento telefon? Data v něm zůstanou, jen se přestanou sdílet.', 'Odpojit')) { Sync.disconnect(); render(); }
