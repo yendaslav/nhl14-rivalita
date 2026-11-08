@@ -38,6 +38,37 @@ const SKILLS = [
   { k: 'def',  label: 'Gól obránce',         xp: 5, extra: true },
 ];
 
+/** Události v zápase: mínusy za fauly a góly v oslabení/přesilovce, plus za bitku (XP za každý kus). */
+const EVENTS = [
+  { k: 'foul',  label: 'Vyloučení (faul)',          xp: -3 },
+  { k: 'pkga',  label: 'Dostal gól, když byl v oslabení', xp: -2 },
+  { k: 'shga',  label: 'Dostal gól, když měl přesilovku', xp: -5 },
+  { k: 'fight', label: 'Vyhraná bitka',             xp: 5 },
+];
+
+/** Mini výzvy během hry: nepovinné drobnosti za pár XP. */
+const MINI = [
+  { k: 'm_fouled',  label: 'Sfauloval tě a stejně dáš gól', xp: 8 },
+  { k: 'm_shg',     label: 'Gól v oslabení',                xp: 10 },
+  { k: 'm_faceoff', label: 'Gól do 10 s po buly',           xp: 8 },
+  { k: 'm_last',    label: 'Gól v posledních 30 s třetiny', xp: 8 },
+  { k: 'm_tie',     label: 'Vyrovnání v poslední minutě',   xp: 12 },
+  { k: 'm_quick',   label: 'Dva góly do 30 sekund',         xp: 10 },
+  { k: 'm_hitgoal', label: 'Hit a z té akce gól',           xp: 8 },
+  { k: 'm_post',    label: 'Tyčka a gól ve stejném útoku',  xp: 6 },
+  { k: 'm_boards',  label: 'Gól odrazem od mantinelu',      xp: 10 },
+  { k: 'm_hat',     label: 'Hattrick jednoho hráče',        xp: 12 },
+  { k: 'm_gassist', label: 'Asistence brankáře',            xp: 15 },
+  { k: 'm_ps',      label: 'Proměněné trestné střílení',    xp: 10 },
+  { k: 'm_pk53',    label: 'Ubráněné oslabení 3 na 5',      xp: 10 },
+  { k: 'm_save',    label: 'Brankář chytil samostatný únik', xp: 5 },
+  { k: 'm_top',     label: 'Gól pod břevno (víko)',          xp: 4 },
+  { k: 'm_rebound', label: 'Gól z dorážky',                 xp: 4 },
+  { k: 'm_celebr',  label: 'Oslava gólu, u které se soupeř zasmál', xp: 3 },
+];
+const COUNTERS = [...SKILLS, ...EVENTS, ...MINI];
+const fmtXp = n => (n > 0 ? '+' : n < 0 ? '−' : '') + Math.abs(n) + ' XP';
+
 const DIFF = { easy: 'Lehká', mid: 'Střední', hard: 'Těžká' };
 const CATS = { auto: 'Automatické', random: 'Náhodné', team: 'Týmové', duel: 'Duely' };
 
@@ -81,11 +112,28 @@ const teamByName = n => TEAM_LIST.find(t => t.name === n);
 /** Výchozí nastavení odměn a trestů (vše editovatelné v Nastavení). */
 const DEFAULT_SETTINGS = {
   leadRules: [
-    { lead: 3,  text: 'kupuje vítězi nikotin (bal / sáčky)' },
+    { lead: 3,  text: 'nosí vítězi pití celý večer' },
     { lead: 5,  text: 'kupuje popcorn a pití na další session' },
     { lead: 10, text: 'platí večeři' },
   ],
   money: { month: 200, blowout: 50, streak10: 300 },
+  rewards: [
+    'Poražený mu udělá kafe nebo donese pití',
+    'Vybírá film nebo seriál na večer',
+    'Vybírá jídlo na příští session',
+    'Poražený mu 2 minuty masíruje ramena',
+    'Celý večer mu poražený říká „šampione“',
+    'Vybírá si tým jako první celý příští týden',
+    'Dostane lepší ovladač a lepší místo na gauči',
+    'Poražený za něj vyklidí myčku',
+    'Vybírá hudbu na celý večer',
+    'Poražený mu napíše ódu na jeho hokej a přečte ji nahlas',
+    'Poražený mu nosí svačinu jako osobní sluha',
+    'Má u soupeře jedno přání (rozumné)',
+    'Smí soupeři vybrat kameru na příští zápas',
+    'Poražený mu dá lajk na 5 posledních fotek na IG',
+    'Pózuje s „trofejí“ (cokoliv po ruce) na společnou fotku',
+  ],
   punishments: [
     'Hraje příští zápas s jinou kamerou / nastavením ovládání',
     'Pochválí vítěze na Instagram story',
@@ -213,6 +261,7 @@ function defaultData() {
     challenges: [],    // { id, cid, p:0|1|'both', cat, name, text, diff, xp, fail, status, date, doneAt, winner }
     xpAdj: [],         // úpravy XP mimo zápasy: { p, xp, reason, date }
     penalties: [],     // { id, loser, text, source, date, done, doneAt, joker, video }
+    rewards: [],       // odměny pro vítěze: { id, p, text, source, date, done, doneAt }
     ledger: [],        // pokladna: { id, from, to, amount, reason, date, settled }
     shame: [],         // síň hanby: { id, p, text, date, hasVideo }
     vetoes: [],        // { id, by, team, date, active }
@@ -242,6 +291,9 @@ function normalize(d) {
   out.settings.money = { ...base.settings.money, ...((d.settings || {}).money || {}) };
   if (!Array.isArray(d.catalog) || !d.catalog.length) out.catalog = base.catalog;
   if (out.names?.[1] === 'Brácha') out.names[1] = 'Seba';   // původní výchozí jméno → Seba
+  // původní výchozí trest s nikotinem → nová výchozí odměna
+  (out.settings.leadRules || []).forEach(r => { if (/nikotin/i.test(r.text)) r.text = 'nosí vítězi pití celý večer'; });
+  if (!Array.isArray(out.settings.rewards)) out.settings.rewards = base.settings.rewards;
   return out;
 }
 
@@ -289,7 +341,7 @@ const fmtNum = n => Math.round(n).toLocaleString('cs-CZ');
 const kc = n => `${fmtNum(n)} Kč`;
 const monthKey = iso => iso.slice(0, 7);
 const monthName = key => new Date(key + '-15T12:00:00').toLocaleDateString('cs-CZ', { month: 'long', year: 'numeric' });
-const emptySkills = () => Object.fromEntries(SKILLS.map(s => [s.k, 0]));
+const emptySkills = () => Object.fromEntries(COUNTERS.map(s => [s.k, 0]));
 const rnd = n => Math.floor(Math.random() * n);
 const shuffle = a => { const b = [...a]; for (let i = b.length - 1; i > 0; i--) { const j = rnd(i + 1); [b[i], b[j]] = [b[j], b[i]]; } return b; };
 const plural = (n, one, few, many) => n === 1 ? one : n >= 2 && n <= 4 ? few : many;
@@ -342,24 +394,48 @@ function teamLogoUrl(t) {
 
 /* ---------- Vtipné přezdívky podle levelu a formy ---------- */
 const LEVEL_TITLES = [
-  [1, 'Nováček z lavičky'], [2, 'Nosič puků'], [3, 'Řidič rolby'], [4, 'Čtvrtá lajna'], [5, 'Bojovník do rohů'],
-  [6, 'Dělo od modré'], [7, 'Dvoucestný forvard'], [8, 'Asistent kapitána'], [10, 'Kapitán šatny'], [12, 'Snajpr'],
-  [14, 'All-Star'], [16, 'Kanonýr ligy'], [18, 'Síň slávy'], [19, 'Hokejový bůh'],
+  'Nováček z lavičky', 'Nosič puků', 'Řidič rolby', 'Ohřívač střídačky', 'Čtvrtá lajna',
+  'Bojovník do rohů', 'Specialista na buly', 'Dělo od modré', 'Třetí lajna', 'Dvoucestný forvard',
+  'Druhá lajna', 'Asistent kapitána', 'Kapitán šatny', 'Snajpr', 'Elitní centr',
+  'All-Star', 'Kanonýr ligy', 'Síň slávy', 'Hokejový bůh',
 ];
 function levelTitle(lv) {
-  const base = LEVEL_TITLES.filter(([l]) => lv.lvl >= l).at(-1)[1];
+  const base = LEVEL_TITLES[Math.min(lv.lvl, LEVEL_TITLES.length) - 1];
   return lv.prestige ? `${base} ★${lv.prestige}` : base;
 }
-/** Krátký štítek podle aktuální formy. */
+
+/** Štítek nálady podle formy, posledního zápasu a celkového vedení (první platný vyhrává). */
 function moodTag(comp, p) {
-  const c = comp.st[p].cur;
-  if (c >= 5) return '🚂 Nezastavitelný';
-  if (c >= 3) return '🔥 V ráži';
-  if (c <= -5) return '🪦 Na odpis';
-  if (c <= -3) return '🧊 Ve slumpu';
-  if (comp.leader === p) return '👑 Šéf ledu';
-  if (comp.leader === 1 - p) return '🎯 Pronásledovatel';
-  return '⚖️ Vyrovnané';
+  const s = comp.st[p], c = s.cur, lead = p === 0 ? comp.lead : -comp.lead;
+  const last = comp.sorted.at(-1);
+  const gf = last ? last.s[p] : 0, ga = last ? last.s[1 - p] : 0, won = gf > ga;
+  const ev = last?.skills?.[p] || {};
+  const rules = [
+    [c >= 8, '🐐 Koza (GOAT)'],
+    [c <= -8, '⚰️ Pohřbený zaživa'],
+    [c >= 5, '🚂 Nezastavitelný'],
+    [c <= -5, '🪦 Na odpis'],
+    [last && won && ga === 0 && gf >= 5, '🧹 Zametač'],
+    [last && won && gf - ga >= 5, '💣 Drtič'],
+    [last && !won && ga - gf >= 5, '🫠 Rozstřílený'],
+    [last && won && ga === 0, '🧱 Betonová zeď'],
+    [last && won && (ev.fight || 0) === 1, '🥊 Rváč se srdcem'],
+    [(ev.foul || 0) >= 4, '🪓 Řezník'],
+    [(ev.fight || 0) >= 2, '🥊 Bijec'],
+    [c >= 3, '🔥 V ráži'],
+    [c <= -3, '🧊 Ve slumpu'],
+    [last && won && last.ot, '😎 Klidná hlava'],
+    [last && !won && last.ot, '😩 Smolař z prodloužení'],
+    [lead >= 15, '👑 Diktátor'],
+    [lead <= -15, '🐢 Věčně druhý'],
+    [lead >= 8, '🦁 Král ledu'],
+    [lead <= -8, '🪣 Nosič vody'],
+    [c === 2, '😏 Rozjetý'],
+    [c === -2, '😬 Nervózní'],
+    [lead > 0, '👑 Šéf ledu'],
+    [lead < 0, '🎯 Pronásledovatel'],
+  ];
+  return (rules.find(([ok]) => ok) || [0, '⚖️ Vyrovnané'])[1];
 }
 
 /* ---------- HLAVNÍ STRÁNKA: hlavička se skóre a statistikami (vlevo hráč 1, vpravo hráč 2) ---------- */
@@ -443,6 +519,7 @@ function blankStats() {
     skills: emptySkills(), skillTotal: 0,
     byMode: Object.fromEntries(MODE_ORDER.map(m => [m, { w: 0, l: 0 }])),
     otW: 0, otL: 0, vetoEarned: 0,
+    ev: Object.fromEntries([...EVENTS, ...MINI].map(e => [e.k, 0])), miniTotal: 0,
     chDone: 0, chFail: 0, penDone: 0,
     ach: {},
   };
@@ -454,7 +531,7 @@ function matchXP(m, p, prevCur) {
   const gf = m.s[p], ga = m.s[1 - p], win = gf > ga;
   let xp = win ? (m.ot && m.mode !== 'SO' ? Math.round(mode.win * OT_FACTOR) : mode.win) : mode.loss;
   const sk = (m.skills && m.skills[p]) || {};
-  for (const s of SKILLS) xp += (sk[s.k] || 0) * s.xp;
+  for (const s of COUNTERS) xp += (sk[s.k] || 0) * s.xp;
   if (win && ga === 0) xp += BONUS.shutout;
   if (win && gf - ga >= 5) xp += BONUS.blowout;
   if (win && prevCur <= -3) xp += BONUS.comeback;
@@ -476,6 +553,8 @@ function compute() {
       s.games++; s.gf += gf; s.ga += ga;
       const sk = (m.skills && m.skills[p]) || {};
       for (const k of SKILLS) { const n = sk[k.k] || 0; s.skills[k.k] += n; if (!k.extra) s.skillTotal += n; }
+      for (const k of EVENTS) s.ev[k.k] += sk[k.k] || 0;
+      for (const k of MINI) { const n = sk[k.k] || 0; s.ev[k.k] += n; s.miniTotal += n; }
       if (win) {
         s.w++; s.byMode[m.mode].w++;
         s.cur = s.cur > 0 ? s.cur + 1 : 1;
@@ -578,6 +657,15 @@ function addPenalty(loser, text, source) {
   celebrate({ kind: 'red', ic: '🚨', k: `Trest · ${source}`, t: rawNm(loser), s: text });
 }
 
+/** Odměna pro hráče p: náhodná ze seznamu v Nastavení, s oslavou. */
+function addReward(p, source, text = null) {
+  const list = data.settings.rewards || [];
+  if (!text && !list.length) return;
+  const t = text || list[rnd(list.length)];
+  data.rewards.push({ id: uid(), p, text: t, source, date: nowISO(), done: false });
+  celebrate({ kind: 'gold', ic: '🎁', k: `Odměna · ${source}`, t: rawNm(p), s: t, confetti: true });
+}
+
 function addDebt(from, to, amount, reason) {
   if (!amount) return;
   data.ledger.push({ id: uid(), from, to, amount, reason, date: nowISO(), settled: false });
@@ -627,6 +715,11 @@ function afterNewMatch(before, after, m) {
     if (cur === -5) autoChallenge('lose5', p);
     if (cur === 4) autoChallenge('win4', p);
   }
+
+  // Odměny za série výher
+  if (after.st[w].cur === 3) addReward(w, 'série 3 výher');
+  if (after.st[w].cur === 5) addReward(w, 'série 5 výher');
+  if (after.st[w].cur === 10) addReward(w, 'série 10 výher');
 
   // Nové veto?
   if (after.st[w].vetoEarned > before.st[w].vetoEarned) toast('🚫', 'Veto získáno', `${rawNm(w)} může soupeři zakázat tým`);
@@ -686,14 +779,17 @@ function mutate(fn) {
   fn(before);
   const after = compute();
   persist();
+  let rewardAdded = false;
   for (const p of [0, 1]) {
     for (const a of ACH) {
       if (after.st[p].ach[a.id] && !before.st[p].ach[a.id]) celebrate({ ic: a.ic, k: `Achievement · ${rawNm(p)}`, t: a.name, s: a.desc, confetti: true });
     }
     const b = before.st[p].lv, n = after.st[p].lv;
     if (n.prestige > b.prestige) celebrate({ kind: 'gold', ic: '🌟', k: 'Prestiž!', t: `${rawNm(p)} ★${n.prestige}`, s: 'Level 20 pokořen. XP se resetuje, hvězda zůstává.', confetti: true });
-    else if (n.lvl > b.lvl) toast('⬆️', 'Level up!', `${rawNm(p)} je level ${n.lvl}`);
+    else if (n.lvl > b.lvl) toast('⬆️', 'Level up!', `${rawNm(p)} je level ${n.lvl} · ${levelTitle(n)}`);
+    if (n.prestige > b.prestige || n.lvl > b.lvl) { addReward(p, n.prestige > b.prestige ? 'prestiž' : `level ${n.lvl}`); rewardAdded = true; }
   }
+  if (rewardAdded) persist();
   render();
   return after;
 }
@@ -832,7 +928,7 @@ const ui = { tab: 'home', histFilter: 'all', statSub: 'over', catFilter: 'random
 function renderNav() {
   const activeCh = data.challenges.filter(c => c.status === 'active').length;
   const openPen = data.penalties.filter(p => !p.done).length;
-  const badge = { chal: activeCh, rew: openPen };
+  const badge = { chal: activeCh, rew: openPen + data.rewards.filter(r => !r.done).length };
   document.getElementById('nav').innerHTML = TABS.map(t =>
     `<button class="${t.id === ui.tab ? 'on' : ''}" data-a="tab" data-v="${t.id}"><b>${t.ic}</b>${t.label}${badge[t.id] ? `<span class="badge">${badge[t.id]}</span>` : ''}</button>`).join('');
 }
@@ -876,6 +972,14 @@ function penaltyRow(p, comp) {
   </div>`;
 }
 
+/** Řádek odměny s tlačítkem „Vybráno“. */
+function rewardRow(r) {
+  return `<div class="pen">
+    <div><b>${nm(r.p)}</b>: ${esc(r.text)}<div class="small mut">${esc(r.source)} · ${fmtDate(r.date)}</div></div>
+    <div class="acts"><button class="pill gold" data-a="rew-done" data-v="${r.id}">Vybráno</button></div>
+  </div>`;
+}
+
 /** Kdo komu kolik dluží (jen nevyrovnané položky). Kladné = hráč 1 dluží hráči 2. */
 function ledgerBalance() {
   let net = 0;
@@ -890,6 +994,7 @@ function ledgerBalance() {
 function viewHome(comp) {
   const active = data.challenges.filter(c => c.status === 'active');
   const openPen = data.penalties.filter(p => !p.done);
+  const openRew = data.rewards.filter(r => !r.done);
   const vetoes = data.vetoes.filter(v => v.active);
   const last = comp.sorted.at(-1);
   const net = ledgerBalance();
@@ -903,6 +1008,7 @@ function viewHome(comp) {
       <button class="qbtn" data-a="draw-mode"><b>🎡</b>Losuj mód</button>
       <button class="qbtn" data-a="draw-ch"><b>⚡</b>Losuj challenge</button>
       <button class="qbtn" data-a="draw-pen"><b>🚨</b>Losuj trest</button>
+      <button class="qbtn" data-a="draw-rew"><b>🎁</b>Losuj odměnu</button>
     </div>
 
     ${vetoes.map(v => `<div class="card warn"><div class="h">🚫 Veto</div><b>${nm(1 - v.by)}</b> nesmí příští zápas hrát za <b>${esc(v.team)}</b></div>`).join('')}
@@ -910,6 +1016,8 @@ function viewHome(comp) {
     ${active.map(challengeCard).join('')}
 
     ${openPen.length ? `<div class="card warn"><div class="h">🍿 Nesplněné tresty</div>${openPen.map(p => penaltyRow(p, comp)).join('')}</div>` : ''}
+
+    ${openRew.length ? `<div class="card goldc"><div class="h">🎁 Odměny k vybrání</div>${openRew.map(rewardRow).join('')}</div>` : ''}
 
     ${net ? `<button class="card goldc row" style="width:100%;text-align:left" data-a="tab" data-v="rew"><span>💰 Dluh: <b>${nm(net > 0 ? 0 : 1)}</b> → ${nm(net > 0 ? 1 : 0)}</span><b style="color:var(--gold);font-size:20px">${kc(Math.abs(net))}</b></button>` : ''}
 
@@ -1006,7 +1114,7 @@ function viewHist(comp) {
           <span class="pn r ${w === 1 ? 'win' : ''}">${nm(1)}</span>
         </div>
         ${t[0] || t[1] ? `<div class="tm"><span>${teamBadge(t[0], 'sm')} ${esc(t[0])}</span><span>${esc(t[1])} ${teamBadge(t[1], 'sm')}</span></div>` : ''}
-        <div class="row small mut"><span>+${x[0]} XP${sk[0] ? ` · ${sk[0]}× skill` : ''}</span><span>${sk[1] ? `${sk[1]}× skill · ` : ''}+${x[1]} XP</span></div>
+        <div class="row small mut"><span>${fmtXp(x[0])}${sk[0] ? ` · ${sk[0]}× skill` : ''}</span><span>${sk[1] ? `${sk[1]}× skill · ` : ''}${fmtXp(x[1])}</span></div>
         <div class="acts"><button data-a="edit" data-v="${m.id}">✏️ Upravit</button><button class="del" data-a="del" data-v="${m.id}">🗑 Smazat</button></div>
       </div>`;
     }).join('') : `<div class="card empty">Žádné zápasy${ui.histFilter !== 'all' ? ' v tomto módu' : ''}.</div>`}
@@ -1040,6 +1148,10 @@ function statOverview(comp) {
     ['Nejdelší série', a.best, b.best, a.best, b.best, true],
     ['Skill shoty', a.skillTotal, b.skillTotal, a.skillTotal, b.skillTotal, true],
     ['Splněné challenge', a.chDone, b.chDone, a.chDone, b.chDone, true],
+    ['Mini výzvy', a.miniTotal, b.miniTotal, a.miniTotal, b.miniTotal, true],
+    ['Vyloučení', a.ev.foul, b.ev.foul, a.ev.foul, b.ev.foul, false],
+    ['Vyhrané bitky', a.ev.fight, b.ev.fight, a.ev.fight, b.ev.fight, true],
+    ['Góly v oslabení obdržené', a.ev.pkga + a.ev.shga, b.ev.pkga + b.ev.shga, a.ev.pkga + a.ev.shga, b.ev.pkga + b.ev.shga, false],
     ['XP celkem', fmtNum(Math.max(0, a.xp)), fmtNum(Math.max(0, b.xp)), a.xp, b.xp, true],
   ];
   const cell = (v, me, other, hi) => `<td class="${me !== other && (hi ? me > other : me < other) ? 'best' : ''}">${v}</td>`;
@@ -1138,7 +1250,15 @@ function viewRew(comp) {
   return `
   <div class="title">Odměny <em>& tresty</em></div>
   <div class="wrap">
-    <button class="btn" data-a="draw-pen">🎡 LOSUJ TREST</button>
+    <div class="btns3" style="grid-template-columns:1fr 1fr">
+      <button class="btn" data-a="draw-rew">🎁 ODMĚNA</button>
+      <button class="btn" style="background:var(--red)" data-a="draw-pen">🚨 TREST</button>
+    </div>
+
+    <div class="card goldc"><div class="h">🎁 Odměny k vybrání (${data.rewards.filter(r => !r.done).length})</div>
+      ${data.rewards.filter(r => !r.done).map(rewardRow).join('') || '<div class="empty" style="padding:8px">Žádné nevybrané odměny. Vyhrávej série a leveluj! 🏆</div>'}
+      <div class="small mut" style="margin-top:8px">Odměna padne sama za každý level, za série 3, 5 a 10 výher, nebo si ji vítěz vylosuje.</div>
+    </div>
 
     <div class="card ${openPen.length ? 'warn' : ''}"><div class="h">🍿 Nesplněné tresty (${openPen.length})</div>
       ${openPen.length ? openPen.map(p => penaltyRow(p, comp)).join('') : '<div class="empty" style="padding:8px">Všechno odpracováno 👌</div>'}
@@ -1227,6 +1347,10 @@ function viewSet() {
         `<div class="money-row"><span>${l}</span><input class="field" type="number" inputmode="numeric" min="0" data-money="${k}" value="${S.money[k]}"></div>`).join('')}
     </div>
 
+    <div class="card"><div class="h">Odměny pro vítěze (1 řádek = 1 odměna)</div>
+      <textarea class="field" id="rewList" rows="10" style="min-height:240px">${esc((S.rewards || []).join('\n'))}</textarea>
+    </div>
+
     <div class="card"><div class="h">Tresty v kole štěstí (1 řádek = 1 trest)</div>
       <textarea class="field" id="punList" rows="10" style="min-height:240px">${esc(S.punishments.join('\n'))}</textarea>
       <div class="small mut" style="margin-top:6px">Trest se slovem „video“ se po splnění nabídne k uložení do Síně hanby.</div>
@@ -1279,6 +1403,8 @@ function renderForm() {
     const n = f.skills[p][k] || 0;
     return `<div class="cnt"><button data-a="sk" data-p="${p}" data-k="${k}" data-d="-1" aria-label="Méně">−</button><b class="${n ? '' : 'z'}">${n}</b><button data-a="sk" data-p="${p}" data-k="${k}" data-d="1" aria-label="Více">＋</button></div>`;
   };
+  const cRow = s => `<div class="sk">${counter(0, s.k)}<div class="lab">${s.label}<small class="${s.xp < 0 ? 'neg' : ''}">${fmtXp(s.xp)}</small></div>${counter(1, s.k)}</div>`;
+  const miniCount = MINI.reduce((n, m) => n + (f.skills[0][m.k] || 0) + (f.skills[1][m.k] || 0), 0);
   // Aktivní challenge k potvrzení (jen u nového zápasu)
   const active = f.id ? [] : data.challenges.filter(c => c.status === 'active');
   const chOpts = c => {
@@ -1310,7 +1436,7 @@ function renderForm() {
       ${f.teams[p] ? teamBadge(f.teams[p]) : '<span class="tbadge custom">?</span>'}
       <span class="n">${f.teams[p] ? esc(f.teams[p]) : `Tým ${nm(p)}`}</span></button>`).join('')}</div>
     ${f.fromScan ? `<div class="card hot scanbox"><div class="h">📷 Načteno z NHL 14</div>
-      <div class="small">Zkontroluj, kdo hrál za koho. Když je to obráceně, prohoď.</div>
+      <div class="small">Zkontroluj, kdo hrál za koho. Když je to obráceně, prohoď.${f.statsFilled ? ' Fauly, přesilovky, oslabení a góly z první jsou vyplněné ze statistik utkání.' : ''}</div>
       <button class="btn ghost" style="margin-top:10px" data-a="swap">⇄ Prohodit ${nm(0)} ↔ ${nm(1)}</button></div>` : ''}
 
     ${f.mode !== 'SO' ? `
@@ -1322,7 +1448,20 @@ function renderForm() {
     <div class="card">
       <div class="h">Skill shoty a bonusy</div>
       <div class="skhead"><span>${nm(0)}</span><span>${nm(1)}</span></div>
-      ${SKILLS.map(s => `<div class="sk">${counter(0, s.k)}<div class="lab">${s.label}<small>+${s.xp} XP</small></div>${counter(1, s.k)}</div>`).join('')}
+      ${SKILLS.map(cRow).join('')}
+    </div>
+
+    <div class="card">
+      <div class="h">Fauly, oslabení, bitky</div>
+      <div class="skhead"><span>${nm(0)}</span><span>${nm(1)}</span></div>
+      ${EVENTS.map(cRow).join('')}
+    </div>
+
+    <div class="card">
+      <button class="row" style="width:100%;min-height:44px" data-a="mini-toggle">
+        <span class="h" style="margin:0">🎯 Mini výzvy během hry ${miniCount ? `(${miniCount})` : ''}</span><span class="small mut">${f.showMini ? 'Skrýt ▲' : 'Ukázat ▼'}</span>
+      </button>
+      ${f.showMini ? `<div class="skhead" style="margin-top:8px"><span>${nm(0)}</span><span>${nm(1)}</span></div>${MINI.map(cRow).join('')}` : ''}
     </div>
 
     ${active.length ? `<div class="card hot"><div class="h">⚡ Aktivní challenge</div>
@@ -1337,7 +1476,7 @@ function renderForm() {
 
 function saveForm() {
   if (!form || form.s[0] === form.s[1]) return;
-  const { chRes, fromScan, ...rest } = form;
+  const { chRes, fromScan, showMini, statsFilled, ...rest } = form;
   const m = { ...rest, ot: form.mode === 'SO' ? false : form.ot, teams: form.teams.map(t => t.trim()) };
   const isNew = !m.id;
   if (isNew) m.id = uid();
@@ -1394,6 +1533,29 @@ async function drawPenalty(p) {
   });
   if (v === 'again') return drawPenalty(p);
   if (v === 'ok') { addPenalty(p, list[pick], 'kolo štěstí'); persist(); render(); }
+}
+
+/** Losování odměny pro vítěze (výchozí = vítěz posledního zápasu). */
+function drawRewardStart() {
+  const last = compute().sorted.at(-1);
+  const def = last ? (last.s[0] > last.s[1] ? 0 : 1) : 0;
+  showModal(`<h3>🎁 Losuj odměnu</h3><p class="mut" style="font-size:14px">Pro koho se točí?</p>
+    ${[0, 1].map(p => `<button class="btn ${p === def ? '' : 'ghost'}" data-a="rew-spin" data-v="${p}">${nm(p)}${p === def && last ? ' (vyhrál poslední)' : ''}</button>`).join('')}
+    <button class="btn ghost" data-a="modal-close">Zrušit</button>`);
+}
+
+async function drawReward(p) {
+  hideModal();
+  const list = data.settings.rewards || [];
+  if (!list.length) { toast('⚠️', 'Žádné odměny', 'Doplň seznam v Nastavení', true); return; }
+  const pick = rnd(list.length);
+  const v = await spinWheel({
+    title: `Odměna · ${rawNm(p)}`, icon: '🎁', labels: list, pick,
+    result: `<div class="big" style="color:var(--gold)">${esc(list[pick])}</div>`,
+    actions: [{ v: 'ok', label: 'Uložit odměnu', cls: 'gold' }, { v: 'again', label: 'Losovat znovu', cls: 'ghost' }, { v: 'no', label: 'Zahodit', cls: 'ghost' }],
+  });
+  if (v === 'again') return drawReward(p);
+  if (v === 'ok') { addReward(p, 'kolo štěstí', list[pick]); persist(); render(); }
 }
 
 /* Losování challenge: nejdřív výběr pro koho a z jaké kategorie */
@@ -1660,6 +1822,7 @@ document.addEventListener('click', async e => {
     case 'sc': { const p = +el.dataset.p; form.s[p] = Math.max(0, Math.min(99, form.s[p] + +el.dataset.d)); renderForm(); break; }
     case 'sk': { const p = +el.dataset.p, k = el.dataset.k; form.skills[p][k] = Math.max(0, (form.skills[p][k] || 0) + +el.dataset.d); renderForm(); break; }
     case 'ot': form.ot = !form.ot; renderForm(); break;
+    case 'mini-toggle': form.showMini = !form.showMini; renderForm(); break;
     case 'swap': form.s.reverse(); form.teams.reverse(); [form.skills[0], form.skills[1]] = [form.skills[1], form.skills[0]]; renderForm(); break;
     case 'fch': form.chRes[v] = el.dataset.r; renderForm(); break;
     case 'save': saveForm(); break;
@@ -1674,6 +1837,14 @@ document.addEventListener('click', async e => {
     case 'draw-mode': drawMode(); break;
     case 'draw-pen': drawPenaltyStart(); break;
     case 'pen-spin': drawPenalty(+v); break;
+    case 'draw-rew': drawRewardStart(); break;
+    case 'rew-spin': drawReward(+v); break;
+    case 'rew-done': {
+      const r = data.rewards.find(x => x.id === v);
+      r.done = true; r.doneAt = nowISO(); persist(); render();
+      toast('🎁', 'Odměna vybrána', `${rawNm(r.p)} si užil: ${r.text}`);
+      break;
+    }
     case 'draw-ch': drawChallengeStart(); break;
     case 'dr-p': drawState.p = v === 'both' ? 'both' : +v; drawChallengeStart(); break;
     case 'dr-cat': drawState.cat = v; drawChallengeStart(); break;
@@ -1806,6 +1977,9 @@ document.addEventListener('input', e => {
   } else if (t.dataset.money !== undefined) {
     data.settings.money[t.dataset.money] = Math.max(0, parseInt(t.value, 10) || 0);
     persist();
+  } else if (t.id === 'rewList') {
+    data.settings.rewards = t.value.split('\n').map(x => x.trim()).filter(Boolean);
+    persist();
   } else if (t.id === 'punList') {
     data.settings.punishments = t.value.split('\n').map(s => s.trim()).filter(Boolean);
     persist();
@@ -1821,17 +1995,30 @@ document.addEventListener('input', e => {
 function openFromLink() {
   const z = new URLSearchParams(location.search).get('z');
   if (!z) return;
+  const stParam = new URLSearchParams(location.search).get('st');
   history.replaceState(null, '', location.pathname);           // ať se po obnovení stránky neotevře znovu
   const [a1, s1, a2, s2, flag] = z.split('.');
   const teamName = abbr => TEAM_LIST.find(t => t.abbr === abbr)?.name || '';
-  let teams = [teamName(a1), teamName(a2)], score = [parseInt(s1, 10) || 0, parseInt(s2, 10) || 0];
+  let teams = [teamName(a1), teamName(a2)], score = [parseInt(s1, 10) || 0, parseInt(s2, 10) || 0], swapped = false;
   // Kdo hrál za koho: podle týmů z minulého zápasu (když sedí obráceně, prohodit)
   const last = [...data.matches].sort((x, y) => x.date.localeCompare(y.date)).at(-1);
   if (last?.teams && (last.teams[1] === teams[0] || last.teams[0] === teams[1]) && last.teams[0] !== teams[0]) {
-    teams.reverse(); score.reverse();
+    teams.reverse(); score.reverse(); swapped = true;
   }
   openForm(null);
   form.teams = teams; form.s = score; form.ot = flag === 'OT' || flag === 'SO'; form.fromScan = true;
+  // st = tr.min. A.B, góly v přesilovce A.B, góly v oslabení A.B, góly z první A.B (pořadí jako v z)
+  const st = (new URLSearchParams(location.search).get('st') || stParam || '').split('.').map(n => parseInt(n, 10));
+  if (st.length === 8 && st.every(n => !isNaN(n))) {
+    let pim = [st[0], st[1]], ppg = [st[2], st[3]], shg = [st[4], st[5]], one = [st[6], st[7]];
+    if (swapped) { pim.reverse(); ppg.reverse(); shg.reverse(); one.reverse(); }
+    for (const p of [0, 1]) {
+      Object.assign(form.skills[p], {
+        foul: Math.round(pim[p] / 2), pkga: ppg[1 - p], shga: shg[1 - p], m_shg: shg[p], one: one[p],
+      });
+    }
+    form.statsFilled = true;
+  }
   renderForm();
   toast('📷', 'Výsledek z NHL 14', `${a1} ${s1} : ${s2} ${a2}${flag ? ' · ' + flag : ''}`);
 }

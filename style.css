@@ -373,3 +373,8 @@ table.cmp{width:100%;border-collapse:collapse;font-size:14px}
 .h2-row .mb i{display:block;height:100%;background:var(--txt);border-radius:5px}
 .h2-row .mb.l i{margin-left:auto}
 .h2-row .mb.r i{background:var(--red)}
+
+/* ---------- Mínusové XP + 4 rychlá tlačítka ---------- */
+.sk .lab small.neg{color:var(--red)}
+.btns3{grid-template-columns:repeat(2,1fr)}
+.qbtn{min-height:64px}
