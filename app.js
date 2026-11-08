@@ -283,6 +283,9 @@ function load() {
   }
 }
 
+/** Seznamy, které se mezi telefony slučují podle id (nic se neztratí ani při zápisu na obou). */
+const SYNC_COLLECTIONS = ['matches', 'challenges', 'xpAdj', 'penalties', 'rewards', 'ledger', 'shame', 'vetoes', 'catalog'];
+
 /** Doplní chybějící pole (např. ze starší zálohy). */
 function normalize(d) {
   const base = defaultData();
@@ -294,15 +297,25 @@ function normalize(d) {
   // původní výchozí trest s nikotinem → nová výchozí odměna
   (out.settings.leadRules || []).forEach(r => { if (/nikotin/i.test(r.text)) r.text = 'nosí vítězi pití celý večer'; });
   if (!Array.isArray(out.settings.rewards)) out.settings.rewards = base.settings.rewards;
+  // Firebase nevrací prázdná pole → doplnit; starší úpravy XP neměly id (kvůli slučování ho potřebují)
+  for (const k of SYNC_COLLECTIONS) if (!Array.isArray(out[k])) out[k] = [];
+  out.xpAdj.forEach((a, i) => { if (!a.id) a.id = `x${i}-${a.date || ''}-${a.p}-${a.xp}`; });
+  if (!Array.isArray(out.deletedIds)) out.deletedIds = [];
   return out;
 }
 
 let data = load();
 
-function persist() {
+/** Uloží data. Změna z tohoto telefonu dostane časové razítko a odešle se druhému telefonu. */
+function persist(fromRemote = false) {
+  if (!fromRemote) data.updatedAt = Date.now();
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }
   catch (e) { toast('⚠️', 'Chyba', 'Data se nepodařilo uložit', true); }
+  if (!fromRemote && typeof Sync !== 'undefined') Sync.schedulePush();
 }
+
+/** Smazání položky si pamatujeme, aby ji druhý telefon při slučování nevrátil zpět. */
+function markDeleted(id) { if (id && !data.deletedIds.includes(id)) data.deletedIds.push(id); }
 
 /* ---------- IndexedDB pro videa Síně hanby ---------- */
 const VideoDB = {
@@ -751,19 +764,19 @@ function resolveChallenge(id, res) {
     if (res === 'win0' || res === 'win1') {
       const w = res === 'win0' ? 0 : 1;
       c.status = 'done'; c.winner = w;
-      data.xpAdj.push({ p: w, xp: c.xp, reason: `${c.name} (výhra)`, date: c.doneAt });
-      data.xpAdj.push({ p: 1 - w, xp: -c.xp, reason: `${c.name} (prohra)`, date: c.doneAt });
+      data.xpAdj.push({ id: uid(), p: w, xp: c.xp, reason: `${c.name} (výhra)`, date: c.doneAt });
+      data.xpAdj.push({ id: uid(), p: 1 - w, xp: -c.xp, reason: `${c.name} (prohra)`, date: c.doneAt });
       toast('⚔️', c.name, `${rawNm(w)} bere ${c.xp} XP od soupeře`);
     } else c.status = 'expired';
     return;
   }
   if (res === 'done') {
     c.status = 'done';
-    data.xpAdj.push({ p: c.p, xp: c.xp, reason: c.name, date: c.doneAt });
+    data.xpAdj.push({ id: uid(), p: c.p, xp: c.xp, reason: c.name, date: c.doneAt });
     toast('⚡', 'Challenge splněna', `${rawNm(c.p)} +${c.xp} XP`);
   } else {
     c.status = 'failed';
-    if (c.fail.xp) data.xpAdj.push({ p: c.p, xp: -c.fail.xp, reason: `${c.name} (nesplněno)`, date: c.doneAt });
+    if (c.fail.xp) data.xpAdj.push({ id: uid(), p: c.p, xp: -c.fail.xp, reason: `${c.name} (nesplněno)`, date: c.doneAt });
     if (c.fail.money) addDebt(c.p, 1 - c.p, c.fail.money, `nesplněná challenge ${c.name}`);
     if (c.fail.penalty && data.settings.punishments.length) {
       const list = data.settings.punishments;
@@ -1356,6 +1369,22 @@ function viewSet() {
       <div class="small mut" style="margin-top:6px">Trest se slovem „video“ se po splnění nabídne k uložení do Síně hanby.</div>
     </div>
 
+    <div class="card ${Sync.room ? 'hot' : ''}"><div class="h">🔄 Synchronizace s druhým telefonem</div>
+      ${Sync.room ? `
+        <div class="row"><span>Stav</span><b>${Sync.statusText()}</b></div>
+        <div class="small mut" style="margin:6px 0 10px">Kód rivality: <b>${esc(Sync.room)}</b></div>
+        <div class="gap8">
+          <button class="btn ghost" data-a="sync-qr">📱 Ukázat QR pro druhý telefon</button>
+          <button class="btn ghost" data-a="sync-now">🔄 Synchronizovat teď</button>
+          <button class="btn danger" data-a="sync-off">Odpojit tento telefon</button>
+        </div>` : `
+        <div class="small mut" style="margin-bottom:10px">Spojí tvůj a Sebův telefon: zápas zapsaný u jednoho se do pár sekund objeví i u druhého.</div>
+        <div class="gap8">
+          <button class="btn" data-a="sync-create">＋ Vytvořit společnou rivalitu</button>
+          <button class="btn ghost" data-a="sync-join">Mám kód od druhého telefonu</button>
+        </div>`}
+    </div>
+
     <div class="card"><div class="h">Záloha dat</div>
       <div class="gap8">
         <button class="btn ghost" data-a="export">⬇️ Exportovat (JSON)</button>
@@ -1829,7 +1858,7 @@ document.addEventListener('click', async e => {
     case 'del':
       if (await confirmBox('Opravdu smazat tento zápas? XP a statistiky se přepočítají.', 'Smazat')) {
         if (form) closeForm();
-        mutate(() => { data.matches = data.matches.filter(m => m.id !== v); });
+        mutate(() => { data.matches = data.matches.filter(m => m.id !== v); markDeleted(v); });
       }
       break;
 
@@ -1879,7 +1908,7 @@ document.addEventListener('click', async e => {
       break;
     case 'ec-del':
       if (await confirmBox(`Smazat „${editCh.name}“ z katalogu?`, 'Smazat')) {
-        data.catalog = data.catalog.filter(c => c.id !== editCh.id);
+        data.catalog = data.catalog.filter(c => c.id !== editCh.id); markDeleted(editCh.id);
         persist(); hideModal(); render();
       }
       break;
@@ -1941,7 +1970,7 @@ document.addEventListener('click', async e => {
     case 'shame-pick': hideModal(); document.getElementById('videoFile').click(); break;
     case 'shame-del':
       if (await confirmBox('Smazat záznam ze Síně hanby?', 'Smazat')) {
-        data.shame = data.shame.filter(s => s.id !== v);
+        data.shame = data.shame.filter(s => s.id !== v); markDeleted(v);
         VideoDB.del(v).catch(() => {});
         persist(); render();
       }
@@ -2024,9 +2053,183 @@ function openFromLink() {
 }
 
 /* =========================================================
+   SYNCHRONIZACE (Firebase Realtime Database přes REST, bez knihoven)
+   Oba telefony sdílí jeden „pokoj“ (náhodný kód). Celý stav se ukládá do
+   /rooms/<kód>; změny chodí živě přes EventSource. Při rozdílu se seznamy
+   sloučí podle id a vyhrává novější verze položek, které jsou v obou.
+   ========================================================= */
+const SYNC_DB = 'https://nhl14-rivalita-default-rtdb.europe-west1.firebasedatabase.app';
+const SYNC_ROOM_KEY = 'nhl14-rivalita-room';
+
+/** Sloučí dva stavy: novější je základ, ze staršího přibudou položky, které novější nezná (a nebyly smazané). */
+function mergeStates(newer, older) {
+  const out = normalize(clone(newer));
+  const o = normalize(clone(older));
+  out.deletedIds = [...new Set([...out.deletedIds, ...o.deletedIds])];
+  const gone = new Set(out.deletedIds);
+  let added = 0;
+  for (const k of SYNC_COLLECTIONS) {
+    out[k] = out[k].filter(x => !gone.has(x.id));
+    const have = new Set(out[k].map(x => x.id));
+    for (const x of o[k]) if (x.id && !have.has(x.id) && !gone.has(x.id)) { out[k].push(x); added++; }
+  }
+  out.seasonsClosed = [...new Set([...(out.seasonsClosed || []), ...(o.seasonsClosed || [])])];
+  return { state: out, added };
+}
+
+const Sync = {
+  room: (() => { try { return localStorage.getItem(SYNC_ROOM_KEY); } catch (e) { return null; } })(),
+  es: null, timer: null, lastOk: 0, status: 'off',
+  url() { return `${SYNC_DB}/rooms/${this.room}.json`; },
+  statusText() {
+    if (this.status === 'live') return '🟢 Připojeno' + (this.lastOk ? ` · ${new Date(this.lastOk).toLocaleTimeString('cs-CZ', { hour: '2-digit', minute: '2-digit' })}` : '');
+    if (this.status === 'error') return '🔴 Bez spojení';
+    return '🟡 Připojuji…';
+  },
+  setStatus(s) { this.status = s; if (ui.tab === 'set') render(); },
+
+  /** Odeslat celý stav (s krátkým zpožděním, ať se víc změn pošle najednou). */
+  schedulePush() {
+    if (!this.room) return;
+    clearTimeout(this.timer);
+    this.timer = setTimeout(() => this.push(), 700);
+  },
+  async push() {
+    if (!this.room) return;
+    try {
+      const r = await fetch(this.url(), { method: 'PUT', body: JSON.stringify(data) });
+      if (!r.ok) throw new Error(r.status);
+      this.lastOk = Date.now(); this.setStatus('live');
+    } catch (e) { this.setStatus('error'); }
+  },
+
+  /** Zpracuje stav ze serveru (při startu, z živého spojení i ručně). */
+  receive(remote) {
+    if (!remote || !remote.matches && !remote.updatedAt) { this.push(); return; }   // prázdný pokoj → nahrát naše data
+    const rAt = remote.updatedAt || 0, lAt = data.updatedAt || 0;
+    if (rAt === lAt) { this.lastOk = Date.now(); this.setStatus('live'); return; }  // to jsme poslali my
+    const before = compute();
+    if (rAt > lAt) {
+      const { state, added } = mergeStates(remote, data);
+      data = state; data.updatedAt = rAt;
+      persist(true);
+      if (added) persist();                 // měli jsme něco navíc → poslat zpět
+      announceRemote(before);
+    } else {
+      const { state } = mergeStates(data, remote);
+      data = state; persist();              // naše verze je novější → poslat
+    }
+    this.lastOk = Date.now(); this.setStatus('live');
+    if (!document.getElementById('sheet').classList.contains('open')) render();
+  },
+  async pull() {
+    if (!this.room) return;
+    try { const r = await fetch(this.url()); this.receive(await r.json()); }
+    catch (e) { this.setStatus('error'); }
+  },
+
+  /** Živé spojení: Firebase posílá změny přes EventSource. Když spadne, zkusí se znovu + záložní dotaz. */
+  connect() {
+    if (!this.room || SYNC_DB.startsWith('FIREBASE')) return;
+    this.disconnect(false);
+    this.setStatus('connecting');
+    try {
+      this.es = new EventSource(this.url());
+      this.es.addEventListener('put', ev => {
+        try { const msg = JSON.parse(ev.data); if (msg.path === '/') this.receive(msg.data); else this.pull(); } catch (e) {}
+      });
+      this.es.addEventListener('patch', () => this.pull());
+      this.es.onerror = () => { this.setStatus('error'); };
+    } catch (e) { this.setStatus('error'); }
+    this.pull();
+  },
+  disconnect(clearRoom = true) {
+    if (this.es) { this.es.close(); this.es = null; }
+    if (clearRoom) { this.room = null; try { localStorage.removeItem(SYNC_ROOM_KEY); } catch (e) {} this.status = 'off'; }
+  },
+  join(code) {
+    this.room = code;
+    try { localStorage.setItem(SYNC_ROOM_KEY, code); } catch (e) {}
+    this.connect();
+  },
+  link() { return `${location.origin}${location.pathname}?room=${encodeURIComponent(this.room)}`; },
+};
+
+/** Ohlásí, co přišlo z druhého telefonu (nový zápas apod.). */
+function announceRemote(before) {
+  const after = compute();
+  const n = after.sorted.length - before.sorted.length;
+  if (n > 0) {
+    const m = after.sorted.at(-1);
+    toast('🔄', 'Z druhého telefonu', `Nový zápas: ${rawNm(0)} ${m.s[0]} : ${m.s[1]} ${rawNm(1)}`);
+  } else toast('🔄', 'Synchronizováno', 'Data z druhého telefonu');
+}
+
+/** QR kód pro druhý telefon (knihovna se načte až při prvním použití). */
+function loadQRLib() {
+  if (window.QRCode) return Promise.resolve();
+  return new Promise((res, rej) => {
+    const sc = document.createElement('script');
+    sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js';
+    sc.onload = res; sc.onerror = rej; document.head.appendChild(sc);
+  });
+}
+async function showSyncQR() {
+  showModal(`<h3>📱 Spojit druhý telefon</h3>
+    <p class="mut" style="font-size:14px">Na druhém telefonu naskenuj tenhle kód fotoaparátem. Otevře se Rivalita a spojí se.</p>
+    <div id="syncQR" style="background:#fff;padding:16px;border-radius:18px;align-self:center"></div>
+    <div class="small mut" style="text-align:center;word-break:break-all">${esc(Sync.link())}</div>
+    <button class="btn ghost" data-a="modal-close">Hotovo</button>`);
+  try {
+    await loadQRLib();
+    new QRCode(document.getElementById('syncQR'), { text: Sync.link(), width: 220, height: 220, colorDark: '#13233F', colorLight: '#ffffff' });
+  } catch (e) { document.getElementById('syncQR').textContent = 'QR se nenačetl, pošli odkaz výše.'; }
+}
+
+/** Odkaz ?room=… z QR druhého telefonu → připojit (a sloučit, co je v tomto telefonu). */
+function joinFromLink() {
+  const room = new URLSearchParams(location.search).get('room');
+  if (!room) return;
+  history.replaceState(null, '', location.pathname);
+  if (Sync.room === room) return;
+  Sync.join(room);
+  toast('🔄', 'Spojeno', 'Tento telefon teď sdílí rivalitu s druhým');
+}
+
+document.addEventListener('click', async e => {
+  const el = e.target.closest('[data-a]');
+  if (!el) return;
+  switch (el.dataset.a) {
+    case 'sync-create': {
+      const code = (crypto.randomUUID ? crypto.randomUUID().replace(/-/g, '') : uid() + uid()).slice(0, 20);
+      Sync.join(code); persist(); render(); showSyncQR();
+      break;
+    }
+    case 'sync-join':
+      showModal(`<h3>Připojit kódem</h3><input class="field" id="syncCode" placeholder="Kód rivality" autocomplete="off">
+        <button class="btn" data-a="sync-join-go">Připojit</button><button class="btn ghost" data-a="modal-close">Zrušit</button>`);
+      break;
+    case 'sync-join-go': {
+      const code = document.getElementById('syncCode').value.trim();
+      if (code) { hideModal(); Sync.join(code); render(); }
+      break;
+    }
+    case 'sync-qr': showSyncQR(); break;
+    case 'sync-now': Sync.pull(); toast('🔄', 'Synchronizace', 'Stahuji data…'); break;
+    case 'sync-off':
+      if (await confirmBox('Odpojit tento telefon? Data v něm zůstanou, jen se přestanou sdílet.', 'Odpojit')) { Sync.disconnect(); render(); }
+      break;
+  }
+});
+/* Po návratu do aplikace (telefon ji uspí) se znovu spojit */
+document.addEventListener('visibilitychange', () => { if (!document.hidden && Sync.room) Sync.connect(); });
+
+/* =========================================================
    START
    ========================================================= */
 document.getElementById('teamsList').innerHTML = TEAMS.map(t => `<option value="${esc(t)}">`).join('');
 render();
 closeSeasons();
+joinFromLink();
+Sync.connect();
 openFromLink();
