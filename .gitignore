@@ -1,0 +1,6 @@
+# Na web jde jen samotná aplikace
+*
+!.gitignore
+!index.html
+!style.css
+!app.js

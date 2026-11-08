@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#F7F3EA">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<title>NHL 14 Rivalita</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Hlavní obsah (vykresluje app.js) -->
+  <main class="app" id="view"></main>
+
+  <!-- Spodní navigace -->
+  <nav class="nav"><div class="in" id="nav"></div></nav>
+
+  <!-- Zápis zápasu (vyjíždí zespodu) -->
+  <div class="sheet" id="sheet"></div>
+
+  <!-- Univerzální modal (losování, editace challenge, veto…) -->
+  <div class="modal hidden" id="modal"><div class="box" id="modalBox"></div></div>
+
+  <!-- Kolo štěstí -->
+  <div class="wheel-ov hidden" id="wheelOv"></div>
+
+  <!-- Velké animace (achievement, trest, šampion) -->
+  <div id="celebrate"></div>
+
+  <!-- Malé notifikace -->
+  <div class="toasts" id="toasts"></div>
+
+  <!-- Skryté souborové vstupy -->
+  <input type="file" id="importFile" accept="application/json,.json" hidden>
+  <input type="file" id="videoFile" accept="video/*" hidden>
+
+  <!-- Našeptávač týmů -->
+  <datalist id="teamsList"></datalist>
+
+  <script src="app.js"></script>
+</body>
+</html>
